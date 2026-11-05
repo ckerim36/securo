@@ -49,6 +49,12 @@ class AgentSettings(BaseSettings):
     # nomic-embed-text via Matryoshka padding/truncation.
     embedding_dim: int = 1536
 
+    # Reasoning depth for Claude 5 generation models, which always think:
+    # low | medium | high | xhigh | max. Claude Opus 5.5 defaults to
+    # "medium" when unset; "high" suits finance and tax answers where a
+    # wrong number costs more than a few extra tokens.
+    anthropic_effort: str = "high"
+
     # Default RAG parameters (overridable per agent in the DB row).
     default_top_n: int = 6
     default_similarity_threshold: float = 0.25

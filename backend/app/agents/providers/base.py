@@ -63,6 +63,12 @@ class ChatMessage:
     # For role="tool":
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
+    # Provider-native assistant content, replayed verbatim instead of being
+    # rebuilt from `content` + `tool_calls`. Anthropic needs this inside a
+    # tool loop: models that always think return signed `thinking` blocks
+    # that must go back unchanged and in their original order. Kept in
+    # memory for the current turn only, never persisted.
+    raw_content: Optional[list[dict[str, Any]]] = None
 
 
 @dataclass
@@ -82,7 +88,9 @@ class Usage:
 @dataclass
 class ChatChunk:
     """Streaming event. Exactly one of these fields is populated per chunk."""
-    type: Literal["text_delta", "tool_call_start", "tool_call_args_delta", "tool_call_end", "finish", "usage"]
+    type: Literal[
+        "text_delta", "tool_call_start", "tool_call_args_delta", "tool_call_end", "finish", "usage", "raw_content",
+    ]
     text: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_name: Optional[str] = None
@@ -91,6 +99,9 @@ class ChatChunk:
     usage: Optional[Usage] = None
     # Delivered on tool_call_end, after all streaming deltas have arrived.
     thought_signature: Optional[str] = None
+    # Delivered once per response on a "raw_content" chunk, before "finish":
+    # the assistant turn as the provider wants it replayed (see ChatMessage).
+    raw_content: Optional[list[dict[str, Any]]] = None
 
 
 @dataclass

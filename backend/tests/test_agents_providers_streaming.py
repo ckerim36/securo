@@ -379,3 +379,137 @@ async def test_anthropic_embed_raises_not_supported():
     provider = AnthropicProvider(api_key="sk-test")
     with pytest.raises(LLMNotSupportedError):
         await provider.embed(["a"], model="x")
+
+
+# --------------------------------------------------------------------- Anthropic: Claude 5 thinking models
+
+def _sse(events: list[dict]) -> list[str]:
+    return ["data: " + json.dumps(e) for e in events]
+
+
+def _thinking_tool_turn() -> list[dict]:
+    return [
+        {"type": "message_start", "message": {"usage": {"input_tokens": 10, "output_tokens": 0}}},
+        {"type": "content_block_start", "index": 0,
+         "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "sig-1"}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_start", "index": 1,
+         "content_block": {"type": "tool_use", "id": "toolu_1", "name": "list_accounts"}},
+        {"type": "content_block_delta", "index": 1,
+         "delta": {"type": "input_json_delta", "partial_json": '{"limit": 5}'}},
+        {"type": "content_block_stop", "index": 1},
+        {"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 3}},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_thinking_model_payload():
+    _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse([
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {}},
+    ])))
+    provider = AnthropicProvider(api_key="sk-test")
+    async for _ in provider.chat_stream([ChatMessage(role="user", content="hi")], model="claude-opus-5-5"):
+        pass
+    _, payload = _FakeAsyncClient.posted[-1]
+    assert payload["max_tokens"] == 32000
+    assert payload["thinking"] == {"type": "adaptive", "block_binding": {"prefix_mismatch_behavior": "drop_block"}}
+    assert payload["output_config"] == {"effort": "high"}
+    assert payload["fallbacks"] == "default"
+    assert "temperature" not in payload
+
+
+@pytest.mark.asyncio
+async def test_anthropic_older_model_payload_unchanged():
+    _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse([
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {}},
+    ])))
+    provider = AnthropicProvider(api_key="sk-test")
+    async for _ in provider.chat_stream([ChatMessage(role="user", content="hi")], model="claude-opus-4-8"):
+        pass
+    _, payload = _FakeAsyncClient.posted[-1]
+    assert payload["max_tokens"] == 4096
+    for key in ("thinking", "output_config", "fallbacks", "cache_control"):
+        assert key not in payload
+
+
+@pytest.mark.asyncio
+async def test_anthropic_no_fallbacks_through_a_proxy_or_for_haiku():
+    for model, base_url in (("claude-opus-5-5", "https://gateway.example.com/v1"), ("claude-haiku-5-5", None)):
+        _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse([
+            {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {}},
+        ])))
+        kwargs = {"base_url": base_url} if base_url else {}
+        provider = AnthropicProvider(api_key="sk-test", **kwargs)
+        async for _ in provider.chat_stream([ChatMessage(role="user", content="hi")], model=model):
+            pass
+        _, payload = _FakeAsyncClient.posted[-1]
+        assert "fallbacks" not in payload
+        assert payload["thinking"]["type"] == "adaptive"
+
+
+@pytest.mark.asyncio
+async def test_anthropic_thinking_blocks_replayed_verbatim_in_tool_loop():
+    _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse(_thinking_tool_turn())))
+    provider = AnthropicProvider(api_key="sk-test")
+    chunks = [c async for c in provider.chat_stream([ChatMessage(role="user", content="x")], model="claude-opus-5-5")]
+
+    raw = [c for c in chunks if c.type == "raw_content"]
+    assert len(raw) == 1
+    assert raw[0].raw_content == [
+        {"type": "thinking", "thinking": "", "signature": "sig-1"},
+        {"type": "tool_use", "id": "toolu_1", "name": "list_accounts", "input": {"limit": 5}},
+    ]
+    # raw_content arrives before finish so the executor can attach it.
+    assert [c.type for c in chunks][-3:] == ["raw_content", "usage", "finish"]
+
+    # Second request of the loop: assistant turn goes back unchanged, and
+    # the results of parallel calls share one user turn.
+    _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse([
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {}},
+    ])))
+    history = [
+        ChatMessage(role="user", content="x"),
+        ChatMessage(role="assistant", content=None, raw_content=raw[0].raw_content),
+        ChatMessage(role="tool", content="r1", tool_call_id="toolu_1"),
+        ChatMessage(role="tool", content="r2", tool_call_id="toolu_2"),
+    ]
+    async for _ in provider.chat_stream(history, model="claude-opus-5-5"):
+        pass
+    _, payload = _FakeAsyncClient.posted[-1]
+    assert payload["messages"][1] == {"role": "assistant", "content": raw[0].raw_content}
+    assert payload["messages"][2]["role"] == "user"
+    assert [b["tool_use_id"] for b in payload["messages"][2]["content"]] == ["toolu_1", "toolu_2"]
+    assert len(payload["messages"]) == 3
+
+
+@pytest.mark.asyncio
+async def test_anthropic_fallback_boundary_drops_earlier_reasoning():
+    events = [
+        {"type": "content_block_start", "index": 0,
+         "content_block": {"type": "thinking", "thinking": "", "signature": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "signature_delta", "signature": "refused"}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_start", "index": 1, "content_block": {"type": "fallback"}},
+        {"type": "content_block_stop", "index": 1},
+        {"type": "content_block_start", "index": 2, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 2, "delta": {"type": "text_delta", "text": "Antwort"}},
+        {"type": "content_block_stop", "index": 2},
+        {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {}},
+    ]
+    _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse(events)))
+    provider = AnthropicProvider(api_key="sk-test")
+    chunks = [c async for c in provider.chat_stream([ChatMessage(role="user", content="x")], model="claude-opus-5-5")]
+    raw = next(c for c in chunks if c.type == "raw_content")
+    assert raw.raw_content == [{"type": "text", "text": "Antwort"}]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_refusal_without_text_is_explained():
+    _FakeAsyncClient.queue_stream.append(_FakeStreamResponse(status_code=200, lines=_sse([
+        {"type": "message_delta", "delta": {"stop_reason": "refusal"}, "usage": {}},
+    ])))
+    provider = AnthropicProvider(api_key="sk-test")
+    chunks = [c async for c in provider.chat_stream([ChatMessage(role="user", content="x")], model="claude-opus-5-5")]
+    assert any(c.type == "text_delta" and c.text for c in chunks)
+    assert chunks[-1].type == "finish" and chunks[-1].finish_reason == "refusal"

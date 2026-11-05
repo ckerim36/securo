@@ -451,6 +451,7 @@ class AgentExecutor:
             finish_reason = "stop"
             usage_input = 0
             usage_output = 0
+            raw_content: Optional[list[dict]] = None
             iter_start = time.time()
             try:
                 async for chunk in provider.chat_stream(
@@ -463,6 +464,8 @@ class AgentExecutor:
                         yield ev
                     if chunk.type == "finish":
                         finish_reason = chunk.finish_reason or "stop"
+                    elif chunk.type == "raw_content":
+                        raw_content = chunk.raw_content
                     elif chunk.type == "usage" and chunk.usage:
                         usage_input = chunk.usage.input_tokens
                         usage_output = chunk.usage.output_tokens
@@ -508,7 +511,12 @@ class AgentExecutor:
                 input_tokens=usage_input or None,
                 output_tokens=usage_output or None,
             )
-            messages.append(ChatMessage(role="assistant", content=assistant_text or None, tool_calls=assembled_calls))
+            messages.append(ChatMessage(
+                role="assistant",
+                content=assistant_text or None,
+                tool_calls=assembled_calls,
+                raw_content=raw_content,
+            ))
 
             # Record one usage row per provider call. Best-effort: a logging
             # failure should never break the user's chat.
