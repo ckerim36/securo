@@ -1,0 +1,102 @@
+# German income tax and social insurance parameters, Veranlagungszeitraum 2026.
+# Every figure is checked against the cited source; percentages are percent
+# (18.6 = 18.6 %) except the flat tax and Soli rates, which are fractions.
+year = 2026
+
+[sources]
+tariff = "§ 32a Abs. 1 EStG idF Art. 2 SteFeG v. 23.12.2024 (BGBl. 2024 I Nr. 449); PAP 2026 v. 12.11.2025"
+soli = "§§ 3, 4 SolZG idF Art. 4 SteFeG"
+werbungskosten = "§ 9 Abs. 1 Nr. 4, § 9a, § 4 Abs. 5 Nr. 6b/6c, § 10c EStG; Entfernungspauschale idF StÄndG 2025 v. 22.12.2025 (BGBl. 2025 I Nr. 363)"
+vorsorge = "§ 10 Abs. 1 Nr. 2, 3, 3a, Abs. 3, Abs. 4 EStG"
+sozialversicherung = "SVBezGrV 2026 (BGBl. 2025 I Nr. 278); RVBeitrSBek 2026 (BGBl. 2025 I Nr. 291); § 341 SGB III; §§ 241, 242a, 243 SGB V (BAnz AT 10.11.2025 B7); § 55 SGB XI"
+bav = "§ 3 Nr. 63 EStG; § 1 Abs. 1 Nr. 9 SvEV"
+kapital = "§ 20 Abs. 9, § 32d EStG; § 18, § 20 InvStG; BMF v. 13.01.2026 (Basiszins)"
+zumutbare_belastung = "§ 33 Abs. 3 EStG; BFH v. 19.01.2017, VI R 75/14"
+haushalt = "§ 35a EStG"
+
+[tariff]
+basic_allowance = 12348
+
+[[tariff.zones]]  # 12.349 - 17.799: (914,51 * y + 1.400) * y
+upper = 17799
+offset = 12348
+a = 914.51
+b = 1400
+
+[[tariff.zones]]  # 17.800 - 69.878: (173,10 * z + 2.397) * z + 1.034,87
+upper = 69878
+offset = 17799
+a = 173.10
+b = 2397
+c = 1034.87
+
+[[tariff.zones]]  # 69.879 - 277.825: 0,42 * x - 11.135,63
+upper = 277825
+rate = 0.42
+minus = 11135.63
+
+[[tariff.zones]]  # ab 277.826: 0,45 * x - 19.470,38
+rate = 0.45
+minus = 19470.38
+
+[soli]
+rate = 0.055
+threshold_single = 20350
+taper_rate = 0.119
+
+[werbungskosten]
+employee_allowance = 1230
+special_expenses_allowance = 36
+home_office_per_day = 6
+home_office_max = 1260
+home_office_room_flat = 1260
+commute_rate_first_km = 0.38
+commute_rate_from_21_km = 0.38
+# Verwaltungspraxis, kein Gesetz: Finanzämter akzeptieren 16 EUR ohne Nachweis.
+account_fee_flat = 16
+# Ab 2026 neben dem Arbeitnehmer-Pauschbetrag abziehbar (§ 9a S. 3 EStG idF StÄndG 2025).
+union_fees_on_top_of_allowance = true
+
+[vorsorge]
+pension_contribution_cap_single = 30826
+pension_deductible_share = 100
+other_insurance_cap_employee = 1900
+sick_pay_reduction = 4
+# PAP 2026: Vorsorgepauschale berücksichtigt den AV-Arbeitnehmeranteil.
+wage_tax_allowance_includes_unemployment = true
+
+[sozialversicherung]
+bbg_pension_annual = 101400
+bbg_health_annual = 69750
+rate_pension = 18.6
+rate_unemployment = 2.6
+rate_health_general = 14.6
+rate_health_reduced = 14.0
+rate_health_avg_extra = 2.9
+rate_care = 3.6
+rate_care_childless_extra = 0.6
+care_childless_min_age = 23
+compulsory_insurance_limit = 77400
+
+[bav]
+tax_free = 8112
+social_free = 4056
+
+[kapital]
+saver_allowance_single = 1000
+flat_tax_rate = 0.25
+fund_base_rate = 3.20
+equity_fund_exemption = 30
+
+[zumutbare_belastung]
+single = [
+  { upper = 15340, rate = 5 },
+  { upper = 51130, rate = 6 },
+  { rate = 7 },
+]
+
+[haushalt]
+services_rate = 20
+services_max = 4000
+craftsmen_rate = 20
+craftsmen_max = 1200
